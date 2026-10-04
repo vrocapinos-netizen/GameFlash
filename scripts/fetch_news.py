@@ -4,9 +4,8 @@ import json
 import re
 import html
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
-
-from googlenewsdecoder import gnewsdecoder
 
 OUTPUT_FILE = "news.json"
 
@@ -21,7 +20,9 @@ def download(url):
     try:
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "Mozilla/5.0"}
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
         )
 
         with urllib.request.urlopen(
@@ -55,7 +56,6 @@ def find_image(text):
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
         r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
-        r'<img[^>]+src=["\']([^"\']+)["\']'
     ]
 
     for pattern in patterns:
@@ -75,25 +75,46 @@ def find_image(text):
 
 
 def get_original_url(google_url):
+
     try:
-        result = gnewsdecoder(
-            google_url,
-            interval=1
+        data = download(google_url)
+
+        if not data:
+            return None
+
+        page = data.decode(
+            "utf-8",
+            errors="ignore"
         )
 
-        if result.get("status"):
-            original = result.get("decoded_url")
+        # Buscar una URL http/https dentro de la respuesta
+        urls = re.findall(
+            r'https?://[^\s"<>]+',
+            page
+        )
 
-            if original:
-                return original
+        for url in urls:
+
+            url = html.unescape(url)
+
+            # Ignorar URLs de Google
+            if "google.com" in url:
+                continue
+
+            if "googleusercontent.com" in url:
+                continue
+
+            if url.startswith("http"):
+                return url
 
     except Exception as error:
-        print("Error descodificando:", error)
+        print("Error buscando URL original:", error)
 
     return None
 
 
 def get_article_image(original_url):
+
     data = download(original_url)
 
     if not data:
@@ -154,7 +175,6 @@ def main():
 
         print("Procesando:", title)
 
-        # Buscar la URL original
         original_url = get_original_url(
             google_url
         )
@@ -168,18 +188,15 @@ def main():
             original_url
         )
 
-        # Buscar la imagen de la web original
         image = get_article_image(
             original_url
         )
 
-        # Si no hay imagen, probar la descripción del RSS
         if not image:
             image = find_image(
                 description
             )
 
-        # Evitar imágenes repetidas
         if image in used_images:
             print(
                 "Imagen repetida, descartada."
@@ -205,7 +222,6 @@ def main():
         if len(articles) >= 60:
             break
 
-    # Eliminar noticias repetidas
     unique = []
     seen_titles = set()
 
@@ -219,7 +235,6 @@ def main():
         seen_titles.add(key)
         unique.append(article)
 
-    # Guardar noticias
     with open(
         OUTPUT_FILE,
         "w",
