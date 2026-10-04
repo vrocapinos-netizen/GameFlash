@@ -451,18 +451,112 @@ def get_article_image(article_url):
 
 def get_fallback_image(title):
     """
-    Imagen de respaldo.
-    Usamos una imagen estable de Unsplash relacionada
-    con videojuegos. Así nunca dejamos la tarjeta vacía.
+    Busca una imagen relacionada con la noticia
+    usando Wikimedia Commons.
     """
+
+    try:
+        # Quitamos palabras poco útiles para mejorar la búsqueda
+        stop_words = {
+            "el", "la", "los", "las", "un", "una",
+            "de", "del", "en", "con", "para", "por",
+            "y", "o", "que", "ya", "es", "más",
+            "a", "se", "su", "al"
+        }
+
+        words = re.findall(
+            r"[A-Za-zÀ-ÿ0-9]+",
+            title.lower()
+        )
+
+        useful_words = [
+            word
+            for word in words
+            if word not in stop_words and len(word) > 2
+        ]
+
+        search_text = " ".join(
+            useful_words[:8]
+        )
+
+        # Añadimos gaming para ayudar a encontrar
+        # imágenes relacionadas con videojuegos.
+        search_text += " video game"
+
+        api_url = "https://commons.wikimedia.org/w/api.php"
+
+        params = {
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": search_text,
+            "gsrnamespace": 6,
+            "gsrlimit": 5,
+            "prop": "imageinfo",
+            "iiprop": "url",
+            "iiurlwidth": 1200,
+            "format": "json"
+        }
+
+        response = requests.get(
+            api_url,
+            params=params,
+            headers=HEADERS,
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        pages = data.get(
+            "query",
+            {}
+        ).get(
+            "pages",
+            {}
+        )
+
+        for page in pages.values():
+
+            imageinfo = page.get(
+                "imageinfo"
+            )
+
+            if not imageinfo:
+                continue
+
+            image = imageinfo[0].get(
+                "thumburl"
+            )
+
+            if not image:
+                image = imageinfo[0].get(
+                    "url"
+                )
+
+            if valid_image_url(image):
+                print(
+                    f"Imagen relacionada encontrada: {image}"
+                )
+
+                return image
+
+    except Exception as e:
+        print(
+            f"No se pudo encontrar imagen relacionada: {e}"
+        )
+
+    # Último respaldo
+    print(
+        "No se encontró imagen relacionada. "
+        "Usando imagen genérica."
+    )
 
     return (
         "https://images.unsplash.com/"
         "photo-1542751371-adc38448a05e"
         "?auto=format&fit=crop&w=1200&q=80"
     )
-
-
 # =========================================================
 # OBTENER NOTICIAS
 # =========================================================
