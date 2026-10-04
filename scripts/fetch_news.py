@@ -158,8 +158,6 @@ def decode_google_news_url(source_url):
                             isinstance(decoded_url, str)
                             and decoded_url.startswith("http")
                         ):
-                            # Limpiar posibles caracteres que Google
-                            # pueda dejar al final de la URL.
                             decoded_url = re.sub(
                                 r'[)"\']+$',
                                 '',
@@ -186,22 +184,31 @@ def clean_text(text):
         return ""
 
     text = html.unescape(text)
-    text = BeautifulSoup(text, "html.parser").get_text(" ")
+    text = BeautifulSoup(
+        text,
+        "html.parser"
+    ).get_text(" ")
 
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
 
     return text.strip()
 
 
 # =========================================================
-# BUSCAR IMAGEN
+# URL DE IMAGEN
 # =========================================================
 
 def make_absolute_url(url, article_url):
     if not url:
         return None
 
-    url = html.unescape(url).strip()
+    url = html.unescape(
+        url
+    ).strip()
 
     if url.startswith("//"):
         return "https:" + url
@@ -210,10 +217,15 @@ def make_absolute_url(url, article_url):
         parsed = urlparse(article_url)
 
         return (
-            f"{parsed.scheme}://{parsed.netloc}{url}"
+            f"{parsed.scheme}://"
+            f"{parsed.netloc}"
+            f"{url}"
         )
 
-    if url.startswith("http://") or url.startswith("https://"):
+    if (
+        url.startswith("http://")
+        or url.startswith("https://")
+    ):
         return url
 
     return None
@@ -223,7 +235,7 @@ def valid_image_url(url):
     if not url:
         return False
 
-    url = url.lower()
+    url_lower = url.lower()
 
     bad_words = [
         "logo",
@@ -240,19 +252,27 @@ def valid_image_url(url):
     ]
 
     for word in bad_words:
-        if word in url:
+        if word in url_lower:
             return False
 
     return (
-        url.startswith("http://")
-        or url.startswith("https://")
+        url_lower.startswith("http://")
+        or url_lower.startswith("https://")
     )
 
 
-def get_article_image(article_url):
-    print(f"Buscando imagen: {article_url}")
+# =========================================================
+# BUSCAR IMAGEN DE LA NOTICIA
+# =========================================================
 
-    response = download(article_url)
+def get_article_image(article_url):
+    print(
+        f"Buscando imagen: {article_url}"
+    )
+
+    response = download(
+        article_url
+    )
 
     if not response:
         return None
@@ -269,17 +289,26 @@ def get_article_image(article_url):
 
         og_image = soup.find(
             "meta",
-            attrs={"property": "og:image"}
+            attrs={
+                "property": "og:image"
+            }
         )
 
-        if og_image and og_image.get("content"):
+        if (
+            og_image
+            and og_image.get("content")
+        ):
             image = make_absolute_url(
                 og_image["content"],
                 article_url
             )
 
             if valid_image_url(image):
-                print(f"Imagen encontrada (og:image): {image}")
+                print(
+                    "Imagen encontrada (og:image): "
+                    f"{image}"
+                )
+
                 return image
 
         # -------------------------------------------------
@@ -288,16 +317,23 @@ def get_article_image(article_url):
 
         twitter_image = soup.find(
             "meta",
-            attrs={"name": "twitter:image"}
+            attrs={
+                "name": "twitter:image"
+            }
         )
 
         if not twitter_image:
             twitter_image = soup.find(
                 "meta",
-                attrs={"property": "twitter:image"}
+                attrs={
+                    "property": "twitter:image"
+                }
             )
 
-        if twitter_image and twitter_image.get("content"):
+        if (
+            twitter_image
+            and twitter_image.get("content")
+        ):
             image = make_absolute_url(
                 twitter_image["content"],
                 article_url
@@ -305,8 +341,10 @@ def get_article_image(article_url):
 
             if valid_image_url(image):
                 print(
-                    f"Imagen encontrada (Twitter): {image}"
+                    "Imagen encontrada (Twitter): "
+                    f"{image}"
                 )
+
                 return image
 
         # -------------------------------------------------
@@ -315,13 +353,16 @@ def get_article_image(article_url):
 
         scripts = soup.find_all(
             "script",
-            attrs={"type": "application/ld+json"}
+            attrs={
+                "type": "application/ld+json"
+            }
         )
 
         for script in scripts:
             try:
                 data = json.loads(
-                    script.string or script.get_text()
+                    script.string
+                    or script.get_text()
                 )
 
                 objects = []
@@ -329,57 +370,100 @@ def get_article_image(article_url):
                 if isinstance(data, dict):
                     objects.append(data)
 
-                    if isinstance(data.get("@graph"), list):
-                        objects.extend(data["@graph"])
+                    if isinstance(
+                        data.get("@graph"),
+                        list
+                    ):
+                        objects.extend(
+                            data["@graph"]
+                        )
 
                 elif isinstance(data, list):
                     objects.extend(data)
 
                 for obj in objects:
-                    if not isinstance(obj, dict):
+
+                    if not isinstance(
+                        obj,
+                        dict
+                    ):
                         continue
 
-                    image_data = obj.get("image")
+                    image_data = obj.get(
+                        "image"
+                    )
 
-                    if isinstance(image_data, str):
+                    if isinstance(
+                        image_data,
+                        str
+                    ):
                         image = make_absolute_url(
                             image_data,
                             article_url
                         )
 
-                        if valid_image_url(image):
+                        if valid_image_url(
+                            image
+                        ):
                             print(
-                                f"Imagen encontrada (JSON-LD): {image}"
+                                "Imagen encontrada "
+                                "(JSON-LD): "
+                                f"{image}"
                             )
+
                             return image
 
-                    elif isinstance(image_data, dict):
-                        image_data = image_data.get("url")
+                    elif isinstance(
+                        image_data,
+                        dict
+                    ):
+                        image_data = (
+                            image_data.get(
+                                "url"
+                            )
+                        )
 
                         image = make_absolute_url(
                             image_data,
                             article_url
                         )
 
-                        if valid_image_url(image):
+                        if valid_image_url(
+                            image
+                        ):
                             print(
-                                f"Imagen encontrada (JSON-LD): {image}"
+                                "Imagen encontrada "
+                                "(JSON-LD): "
+                                f"{image}"
                             )
+
                             return image
 
-                    elif isinstance(image_data, list):
+                    elif isinstance(
+                        image_data,
+                        list
+                    ):
                         for item in image_data:
-                            if isinstance(item, str):
-                                image = make_absolute_url(
-                                    item,
-                                    article_url
+
+                            if isinstance(
+                                item,
+                                str
+                            ):
+                                image = (
+                                    make_absolute_url(
+                                        item,
+                                        article_url
+                                    )
                                 )
 
-                                if valid_image_url(image):
+                                if valid_image_url(
+                                    image
+                                ):
                                     print(
                                         "Imagen encontrada "
                                         "(JSON-LD lista)"
                                     )
+
                                     return image
 
             except Exception:
@@ -390,19 +474,41 @@ def get_article_image(article_url):
         # -------------------------------------------------
 
         possible_tags = [
-            ("meta", "name", "image"),
-            ("meta", "property", "image"),
-            ("meta", "name", "thumbnail"),
-            ("meta", "property", "thumbnail"),
+            (
+                "meta",
+                "name",
+                "image"
+            ),
+            (
+                "meta",
+                "property",
+                "image"
+            ),
+            (
+                "meta",
+                "name",
+                "thumbnail"
+            ),
+            (
+                "meta",
+                "property",
+                "thumbnail"
+            ),
         ]
 
         for tag, attribute, value in possible_tags:
+
             element = soup.find(
                 tag,
-                attrs={attribute: value}
+                attrs={
+                    attribute: value
+                }
             )
 
-            if element and element.get("content"):
+            if (
+                element
+                and element.get("content")
+            ):
                 image = make_absolute_url(
                     element["content"],
                     article_url
@@ -410,15 +516,19 @@ def get_article_image(article_url):
 
                 if valid_image_url(image):
                     print(
-                        f"Imagen encontrada (meta): {image}"
+                        "Imagen encontrada "
+                        "(meta): "
+                        f"{image}"
                     )
+
                     return image
 
         # -------------------------------------------------
-        # 5. Primera imagen grande de la página
+        # 5. Primera imagen de la página
         # -------------------------------------------------
 
         for img in soup.find_all("img"):
+
             candidates = [
                 img.get("src"),
                 img.get("data-src"),
@@ -427,6 +537,7 @@ def get_article_image(article_url):
             ]
 
             for candidate in candidates:
+
                 image = make_absolute_url(
                     candidate,
                     article_url
@@ -434,155 +545,214 @@ def get_article_image(article_url):
 
                 if valid_image_url(image):
                     print(
-                        f"Imagen encontrada (img): {image}"
+                        "Imagen encontrada "
+                        "(img): "
+                        f"{image}"
                     )
+
                     return image
 
     except Exception as e:
-        print(f"Error buscando imagen: {e}")
+        print(
+            f"Error buscando imagen: {e}"
+        )
 
-    print("No se encontró imagen.")
+    print(
+        "No se encontró imagen."
+    )
+
     return None
 
 
 # =========================================================
-# IMAGEN DE RESPALDO
+# IMÁGENES DE RESPALDO
 # =========================================================
 
 def get_fallback_image(title):
     """
-    Busca una imagen relacionada con la noticia
-    usando Wikimedia Commons.
+    Devuelve diferentes imágenes de respaldo
+    según el tema de la noticia.
     """
 
-    try:
-        # Quitamos palabras poco útiles para mejorar la búsqueda
-        stop_words = {
-            "el", "la", "los", "las", "un", "una",
-            "de", "del", "en", "con", "para", "por",
-            "y", "o", "que", "ya", "es", "más",
-            "a", "se", "su", "al"
-        }
+    title_lower = title.lower()
 
-        words = re.findall(
-            r"[A-Za-zÀ-ÿ0-9]+",
-            title.lower()
-        )
+    fallback_images = {
 
-        useful_words = [
-            word
-            for word in words
-            if word not in stop_words and len(word) > 2
-        ]
+        # MINECRAFT
+        "minecraft": [
+            "https://images.unsplash.com/photo-1606092195730-5d7b9af1efc5?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1627856013091-fed6e4e30025?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        search_text = " ".join(
-            useful_words[:8]
-        )
+        # FORTNITE
+        "fortnite": [
+            "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        # Añadimos gaming para ayudar a encontrar
-        # imágenes relacionadas con videojuegos.
-        search_text += " video game"
+        # PLAYSTATION
+        "playstation": [
+            "https://images.unsplash.com/photo-1607853202273-797f1c22a38e?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1592840062661-6d2a8d8b7e5c?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        api_url = "https://commons.wikimedia.org/w/api.php"
+        # PS5
+        "ps5": [
+            "https://images.unsplash.com/photo-1607853202273-797f1c22a38e?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1621259182978-fbf93132d53d?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        params = {
-            "action": "query",
-            "generator": "search",
-            "gsrsearch": search_text,
-            "gsrnamespace": 6,
-            "gsrlimit": 5,
-            "prop": "imageinfo",
-            "iiprop": "url",
-            "iiurlwidth": 1200,
-            "format": "json"
-        }
+        # XBOX
+        "xbox": [
+            "https://images.unsplash.com/photo-1621259182978-fbf93132d53d?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1605901309584-818e25960a8f?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        response = requests.get(
-            api_url,
-            params=params,
-            headers=HEADERS,
-            timeout=15
-        )
+        # NINTENDO
+        "nintendo": [
+            "https://images.unsplash.com/photo-1578303512597-81e6cc155b3e?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        response.raise_for_status()
+        # SWITCH
+        "switch": [
+            "https://images.unsplash.com/photo-1578303512597-81e6cc155b3e?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1597096200317-5f8e8a9d4a9b?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        data = response.json()
+        # POKEMON
+        "pokemon": [
+            "https://images.unsplash.com/photo-1542779283-429940ce8336?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        pages = data.get(
-            "query",
-            {}
-        ).get(
-            "pages",
-            {}
-        )
+        # FÚTBOL
+        "futbol": [
+            "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1553778263-73a83bab9b0c?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-        for page in pages.values():
+        # FC
+        "fc 27": [
+            "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1553778263-73a83bab9b0c?auto=format&fit=crop&w=1200&q=80",
+        ],
 
-            imageinfo = page.get(
-                "imageinfo"
+        # GTA
+        "gta": [
+            "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?auto=format&fit=crop&w=1200&q=80",
+        ],
+
+        # GAMING
+        "gaming": [
+            "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80",
+            "https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?auto=format&fit=crop&w=1200&q=80",
+        ],
+    }
+
+    # -----------------------------------------------------
+    # Buscar categoría por título
+    # -----------------------------------------------------
+
+    for keyword, images in fallback_images.items():
+
+        if keyword in title_lower:
+
+            index = (
+                sum(
+                    ord(character)
+                    for character in title
+                )
+                % len(images)
             )
 
-            if not imageinfo:
-                continue
+            image = images[index]
 
-            image = imageinfo[0].get(
-                "thumburl"
+            print(
+                "Imagen de respaldo temática "
+                f"({keyword}): {image}"
             )
 
-            if not image:
-                image = imageinfo[0].get(
-                    "url"
-                )
+            return image
 
-            if valid_image_url(image):
-                print(
-                    f"Imagen relacionada encontrada: {image}"
-                )
+    # -----------------------------------------------------
+    # Respaldo general
+    # -----------------------------------------------------
 
-                return image
+    general_images = [
+        "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1200&q=80",
+        "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80",
+        "https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?auto=format&fit=crop&w=1200&q=80",
+        "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=1200&q=80",
+    ]
 
-    except Exception as e:
-        print(
-            f"No se pudo encontrar imagen relacionada: {e}"
+    index = (
+        sum(
+            ord(character)
+            for character in title
         )
+        % len(general_images)
+    )
 
-    # Último respaldo
+    image = general_images[index]
+
     print(
-        "No se encontró imagen relacionada. "
-        "Usando imagen genérica."
+        f"Imagen de respaldo general: {image}"
     )
 
-    return (
-        "https://images.unsplash.com/"
-        "photo-1542751371-adc38448a05e"
-        "?auto=format&fit=crop&w=1200&q=80"
-    )
+    return image
+
+
 # =========================================================
 # OBTENER NOTICIAS
 # =========================================================
 
 def get_news():
-    print("Descargando Google News...")
 
-    response = download(RSS_URL)
+    print(
+        "Descargando Google News..."
+    )
+
+    response = download(
+        RSS_URL
+    )
 
     if not response:
         return []
 
     try:
-        root = ET.fromstring(response.content)
+        root = ET.fromstring(
+            response.content
+        )
 
     except Exception as e:
-        print(f"Error leyendo RSS: {e}")
+        print(
+            f"Error leyendo RSS: {e}"
+        )
+
         return []
 
     articles = []
 
     for item in root.findall(".//item"):
-        title_element = item.find("title")
-        link_element = item.find("link")
-        description_element = item.find("description")
-        date_element = item.find("pubDate")
+
+        title_element = item.find(
+            "title"
+        )
+
+        link_element = item.find(
+            "link"
+        )
+
+        description_element = item.find(
+            "description"
+        )
+
+        date_element = item.find(
+            "pubDate"
+        )
 
         if title_element is None:
             continue
@@ -593,8 +763,10 @@ def get_news():
 
         google_link = (
             link_element.text.strip()
-            if link_element is not None
-            and link_element.text
+            if (
+                link_element is not None
+                and link_element.text
+            )
             else ""
         )
 
@@ -606,8 +778,10 @@ def get_news():
 
         date = (
             date_element.text.strip()
-            if date_element is not None
-            and date_element.text
+            if (
+                date_element is not None
+                and date_element.text
+            )
             else ""
         )
 
@@ -632,13 +806,19 @@ def main():
 
     articles = get_news()
 
-    print(f"Noticias encontradas en RSS: {len(articles)}")
+    print(
+        f"Noticias encontradas en RSS: "
+        f"{len(articles)}"
+    )
 
     final_news = []
+
     seen_urls = set()
     seen_titles = set()
 
-    for index, article in enumerate(articles):
+    for index, article in enumerate(
+        articles
+    ):
 
         if len(final_news) >= MAX_NEWS:
             break
@@ -654,24 +834,37 @@ def main():
             continue
 
         print("")
-        print("=" * 60)
         print(
-            f"Noticia {len(final_news) + 1}: {title}"
+            "=" * 60
+        )
+
+        print(
+            f"Noticia "
+            f"{len(final_news) + 1}: "
+            f"{title}"
         )
 
         # -------------------------------------------------
         # Decodificar URL
         # -------------------------------------------------
 
-        original_url = decode_google_news_url(
-            article["googleLink"]
+        original_url = (
+            decode_google_news_url(
+                article["googleLink"]
+            )
         )
 
         if not original_url:
-            print("No se encontró la URL original.")
+
+            print(
+                "No se encontró la URL original."
+            )
+
             continue
 
-        print(f"URL original: {original_url}")
+        print(
+            f"URL original: {original_url}"
+        )
 
         # -------------------------------------------------
         # Evitar duplicados
@@ -680,11 +873,16 @@ def main():
         if original_url in seen_urls:
             continue
 
-        seen_urls.add(original_url)
-        seen_titles.add(title_key)
+        seen_urls.add(
+            original_url
+        )
+
+        seen_titles.add(
+            title_key
+        )
 
         # -------------------------------------------------
-        # Buscar imagen
+        # Buscar imagen real
         # -------------------------------------------------
 
         image = get_article_image(
@@ -692,15 +890,18 @@ def main():
         )
 
         # -------------------------------------------------
-        # FALLBACK
+        # Si no hay imagen, buscar respaldo
         # -------------------------------------------------
 
         if not image:
+
             print(
                 "Usando imagen de respaldo."
             )
 
-            image = get_fallback_image(title)
+            image = get_fallback_image(
+                title
+            )
 
         # -------------------------------------------------
         # Guardar noticia
@@ -708,23 +909,32 @@ def main():
 
         news_item = {
             "title": title,
-            "description": article["description"],
+            "description": article[
+                "description"
+            ],
             "link": original_url,
-            "googleLink": article["googleLink"],
+            "googleLink": article[
+                "googleLink"
+            ],
             "image": image,
             "category": "Para ti",
             "game": "",
             "date": article["date"]
         }
 
-        final_news.append(news_item)
+        final_news.append(
+            news_item
+        )
 
-        # Pequeña pausa para no bombardear las webs
+        # -------------------------------------------------
+        # Pequeña pausa
+        # -------------------------------------------------
+
         time.sleep(0.3)
 
-    # -----------------------------------------------------
-    # Guardar JSON
-    # -----------------------------------------------------
+    # =====================================================
+    # GUARDAR NEWS.JSON
+    # =====================================================
 
     with open(
         "news.json",
@@ -746,12 +956,32 @@ def main():
     )
 
     print("")
-    print("=" * 60)
-    print(f"Noticias guardadas: {len(final_news)}")
-    print(f"Noticias con imagen: {images}")
-    print("news.json actualizado correctamente.")
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
 
+    print(
+        f"Noticias guardadas: "
+        f"{len(final_news)}"
+    )
+
+    print(
+        f"Noticias con imagen: "
+        f"{images}"
+    )
+
+    print(
+        "news.json actualizado correctamente."
+    )
+
+    print(
+        "=" * 60
+    )
+
+
+# =========================================================
+# INICIO
+# =========================================================
 
 if __name__ == "__main__":
     main()
