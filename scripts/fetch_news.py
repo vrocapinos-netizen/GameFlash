@@ -1,4 +1,4 @@
-```python
+
 #!/usr/bin/env python3
 
 from urllib.request import Request, urlopen
@@ -195,4 +195,3 @@ OUT.write_text(
 )
 
 print(f"Noticias guardadas: {len(merged)}")
-```
