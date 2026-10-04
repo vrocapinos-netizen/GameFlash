@@ -5,6 +5,7 @@ import re
 import html
 import urllib.request
 import urllib.parse
+import urllib.parse
 import xml.etree.ElementTree as ET
 
 OUTPUT_FILE = "news.json"
@@ -27,7 +28,7 @@ def download(url):
 
         with urllib.request.urlopen(
             request,
-            timeout=15
+            timeout=20
         ) as response:
             return response.read()
 
@@ -73,83 +74,188 @@ def find_image(text):
 
     return None
 
-def get_original_url(google_url):
+
+def get_decoding_params(google_url):
 
     try:
-        import urllib.parse
-        import urllib.request
-        import re
-        import json
+        parsed = urllib.parse.urlparse(
+            google_url
+        )
+
+        article_id = parsed.path.split("/")[-1]
+
+        if not article_id:
+            return None
+
+        article_url = (
+            "https://news.google.com/rss/articles/"
+            + article_id
+        )
 
         request = urllib.request.Request(
-            google_url,
+            article_url,
             headers={
-                "User-Agent": "Mozilla/5.0"
+                "User-Agent": "Mozilla/5.0",
+                "Accept-Language": "es-ES,es;q=0.9"
             }
         )
 
         with urllib.request.urlopen(
             request,
-            timeout=15
+            timeout=20
         ) as response:
             page = response.read().decode(
                 "utf-8",
                 errors="ignore"
             )
 
-        # Buscar una URL de artículo directamente
-        patterns = [
-            r'"url":"(https?://[^"]+)"',
-            r'"articleUrl":"(https?://[^"]+)"',
-            r'"targetUrl":"(https?://[^"]+)"'
-        ]
-
-        for pattern in patterns:
-            matches = re.findall(
-                pattern,
-                page
-            )
-
-            for url in matches:
-                url = urllib.parse.unquote(url)
-
-                if (
-                    "google.com" not in url
-                    and "googleusercontent.com" not in url
-                    and "gstatic.com" not in url
-                ):
-                    return url
-
-        # Buscar enlaces normales dentro de la página
-        urls = re.findall(
-            r'https?://[^\s"<>]+',
+        signature_match = re.search(
+            r'data-n-a-sg="([^"]+)"',
             page
         )
 
-        for url in urls:
-            url = urllib.parse.unquote(
-                url
-            )
+        timestamp_match = re.search(
+            r'data-n-a-ts="([^"]+)"',
+            page
+        )
 
-            if (
-                "google.com" not in url
-                and "googleusercontent.com" not in url
-                and "gstatic.com" not in url
-                and "google-analytics.com" not in url
-            ):
-                return url
+        if not signature_match or not timestamp_match:
+            print("No se encontraron los parámetros de Google News.")
+            return None
+
+        return {
+            "id": article_id,
+            "signature": signature_match.group(1),
+            "timestamp": timestamp_match.group(1)
+        }
 
     except Exception as error:
         print(
-            "Error obteniendo URL original:",
+            "Error obteniendo parámetros:",
+            error
+        )
+
+        return None
+
+
+def decode_google_news_url(google_url):
+
+    params = get_decoding_params(
+        google_url
+    )
+
+    if not params:
+        return None
+
+    article_id = params["id"]
+    signature = params["signature"]
+    timestamp = params["timestamp"]
+
+    request_data = (
+        '["garturlreq",'
+        '[["X","X",["X","X"],null,null,1,1,'
+        '"US:en",null,1,null,null,null,null,null,0,1],'
+        '"X","X",1,[1,1,1],1,1,null,0,0,null,0],'
+        f'"{article_id}",'
+        f'{timestamp},'
+        f'"{signature}"'
+        ']'
+    )
+
+    batch = [
+        [
+            "Fbv4je",
+            request_data,
+            None,
+            "generic"
+        ]
+    ]
+
+    payload = (
+        "f.req="
+        + urllib.parse.quote(
+            json.dumps([batch])
+        )
+    )
+
+    request = urllib.request.Request(
+        "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+        data=payload.encode("utf-8"),
+        headers={
+            "Content-Type":
+                "application/x-www-form-urlencoded;charset=UTF-8",
+            "User-Agent":
+                "Mozilla/5.0",
+            "Referer":
+                "https://news.google.com/"
+        },
+        method="POST"
+    )
+
+    try:
+
+        with urllib.request.urlopen(
+            request,
+            timeout=20
+        ) as response:
+
+            result = response.read().decode(
+                "utf-8",
+                errors="ignore"
+            )
+
+        match = re.search(
+            r'\[\\"garturlres\\",\\"(https?://.*?),',
+            result
+        )
+
+        if match:
+
+            decoded_url = match.group(1)
+
+            decoded_url = (
+                decoded_url
+                .replace('\\"', '"')
+                .replace("\\/", "/")
+            )
+
+            return decoded_url
+
+        print(
+            "Google no devolvió la URL original."
+        )
+
+    except Exception as error:
+
+        print(
+            "Error en batchexecute:",
             error
         )
 
     return None
-    
+
+
+def get_original_url(google_url):
+
+    if not google_url:
+        return None
+
+    if "news.google.com" not in google_url:
+        return google_url
+
+    return decode_google_news_url(
+        google_url
+    )
+
+
 def get_article_image(original_url):
 
-    data = download(original_url)
+    if not original_url:
+        return None
+
+    data = download(
+        original_url
+    )
 
     if not data:
         return None
@@ -159,24 +265,40 @@ def get_article_image(original_url):
         errors="ignore"
     )
 
-    return find_image(page)
+    return find_image(
+        page
+    )
 
 
 def main():
 
     print("Descargando noticias...")
 
-    data = download(RSS_URL)
+    data = download(
+        RSS_URL
+    )
 
     if not data:
-        print("No se pudo descargar el RSS.")
+
+        print(
+            "No se pudo descargar el RSS."
+        )
+
         return
 
     try:
-        root = ET.fromstring(data)
+
+        root = ET.fromstring(
+            data
+        )
 
     except Exception as error:
-        print("Error leyendo RSS:", error)
+
+        print(
+            "Error leyendo RSS:",
+            error
+        )
+
         return
 
     articles = []
@@ -207,14 +329,21 @@ def main():
         if not title or not google_url:
             continue
 
-        print("Procesando:", title)
+        print(
+            "Procesando:",
+            title
+        )
 
         original_url = get_original_url(
             google_url
         )
 
         if not original_url:
-            print("No se encontró la URL original.")
+
+            print(
+                "No se encontró la URL original."
+            )
+
             continue
 
         print(
@@ -227,22 +356,31 @@ def main():
         )
 
         if not image:
+
             image = find_image(
                 description
             )
 
         if image in used_images:
+
             print(
                 "Imagen repetida, descartada."
             )
+
             image = ""
 
         if image:
-            used_images.add(image)
+            used_images.add(
+                image
+            )
 
         article = {
-            "title": clean_text(title),
-            "description": clean_text(description)[:300],
+            "title": clean_text(
+                title
+            ),
+            "description": clean_text(
+                description
+            )[:300],
             "link": original_url,
             "googleLink": google_url,
             "image": image,
@@ -251,7 +389,9 @@ def main():
             "date": pub_date
         }
 
-        articles.append(article)
+        articles.append(
+            article
+        )
 
         if len(articles) >= 60:
             break
@@ -266,8 +406,13 @@ def main():
         if key in seen_titles:
             continue
 
-        seen_titles.add(key)
-        unique.append(article)
+        seen_titles.add(
+            key
+        )
+
+        unique.append(
+            article
+        )
 
     with open(
         OUTPUT_FILE,
@@ -283,6 +428,7 @@ def main():
         )
 
     print("--------------------------------")
+
     print(
         f"Noticias guardadas: {len(unique)}"
     )
