@@ -1,14 +1,17 @@
-#!/usr/bin/env python3
-
 import json
 import re
+import time
 import html
-import urllib.request
-import urllib.parse
-import urllib.parse
+import requests
 import xml.etree.ElementTree as ET
 
-OUTPUT_FILE = "news.json"
+from bs4 import BeautifulSoup
+from urllib.parse import quote, urlparse
+
+
+# =========================================================
+# CONFIGURACIÓN
+# =========================================================
 
 RSS_URL = (
     "https://news.google.com/rss/search?"
@@ -16,433 +19,644 @@ RSS_URL = (
     "&hl=es&gl=ES&ceid=ES:es"
 )
 
+MAX_NEWS = 60
 
-def download(url):
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/154.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/webp,*/*;q=0.8"
+    ),
+}
+
+
+# =========================================================
+# DESCARGAR
+# =========================================================
+
+def download(url, timeout=15):
     try:
-        request = urllib.request.Request(
+        response = requests.get(
             url,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            }
+            headers=HEADERS,
+            timeout=timeout,
+            allow_redirects=True
         )
 
-        with urllib.request.urlopen(
-            request,
-            timeout=20
-        ) as response:
-            return response.read()
+        response.raise_for_status()
+        return response
 
-    except Exception as error:
-        print("Error descargando:", url)
-        print(error)
+    except Exception as e:
+        print(f"Error descargando {url}: {e}")
         return None
 
+
+# =========================================================
+# DECODIFICAR GOOGLE NEWS
+# =========================================================
+
+def get_decoding_params(gn_art_id):
+    try:
+        url = f"https://news.google.com/rss/articles/{gn_art_id}"
+
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        div = soup.select_one("c-wiz > div")
+
+        if not div:
+            return None
+
+        signature = div.get("data-n-a-sg")
+        timestamp = div.get("data-n-a-ts")
+
+        if not signature or not timestamp:
+            return None
+
+        return {
+            "signature": signature,
+            "timestamp": timestamp,
+            "gn_art_id": gn_art_id
+        }
+
+    except Exception as e:
+        print(f"No se pudieron obtener parámetros: {e}")
+        return None
+
+
+def decode_google_news_url(source_url):
+    try:
+        path = urlparse(source_url).path
+        gn_art_id = path.rstrip("/").split("/")[-1]
+
+        if not gn_art_id:
+            return None
+
+        params = get_decoding_params(gn_art_id)
+
+        if not params:
+            return None
+
+        articles_req = [
+            "Fbv4je",
+            (
+                '["garturlreq",'
+                '[["X","X",["X","X"],null,null,1,1,"US:en",null,1,'
+                'null,null,null,null,null,0,1],'
+                '"X","X",1,[1,1,1],1,1,null,0,0,null,0],'
+                f'"{params["gn_art_id"]}",'
+                f'{params["timestamp"]},'
+                f'"{params["signature"]}"]'
+            )
+        ]
+
+        payload = "f.req=" + quote(
+            json.dumps([[articles_req]])
+        )
+
+        response = requests.post(
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            headers={
+                **HEADERS,
+                "Content-Type":
+                    "application/x-www-form-urlencoded;charset=UTF-8"
+            },
+            data=payload,
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        parts = response.text.split("\n\n")
+
+        if len(parts) < 2:
+            return None
+
+        data = json.loads(parts[1])
+
+        for item in data:
+            try:
+                if len(item) > 2:
+                    result = json.loads(item[2])
+
+                    if isinstance(result, list) and len(result) > 1:
+                        decoded_url = result[1]
+
+                        if (
+                            isinstance(decoded_url, str)
+                            and decoded_url.startswith("http")
+                        ):
+                            # Limpiar posibles caracteres que Google
+                            # pueda dejar al final de la URL.
+                            decoded_url = re.sub(
+                                r'[)"\']+$',
+                                '',
+                                decoded_url
+                            )
+
+                            return decoded_url
+
+            except Exception:
+                continue
+
+    except Exception as e:
+        print(f"Error decodificando Google News: {e}")
+
+    return None
+
+
+# =========================================================
+# LIMPIAR TEXTO
+# =========================================================
 
 def clean_text(text):
     if not text:
         return ""
 
     text = html.unescape(text)
-    text = re.sub(r"<[^>]+>", "", text)
+    text = BeautifulSoup(text, "html.parser").get_text(" ")
+
+    text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
 
-def find_image(text):
-    if not text:
+# =========================================================
+# BUSCAR IMAGEN
+# =========================================================
+
+def make_absolute_url(url, article_url):
+    if not url:
         return None
 
-    patterns = [
-        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
-    ]
+    url = html.unescape(url).strip()
 
-    for pattern in patterns:
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
+    if url.startswith("//"):
+        return "https:" + url
+
+    if url.startswith("/"):
+        parsed = urlparse(article_url)
+
+        return (
+            f"{parsed.scheme}://{parsed.netloc}{url}"
         )
 
-        if match:
-            image = html.unescape(match.group(1))
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
 
-            if image.startswith("http"):
+    return None
+
+
+def valid_image_url(url):
+    if not url:
+        return False
+
+    url = url.lower()
+
+    bad_words = [
+        "logo",
+        "avatar",
+        "favicon",
+        "icon",
+        "sprite",
+        "tracking",
+        "analytics",
+        "pixel",
+        "placeholder",
+        "blank.gif",
+        "1x1"
+    ]
+
+    for word in bad_words:
+        if word in url:
+            return False
+
+    return (
+        url.startswith("http://")
+        or url.startswith("https://")
+    )
+
+
+def get_article_image(article_url):
+    print(f"Buscando imagen: {article_url}")
+
+    response = download(article_url)
+
+    if not response:
+        return None
+
+    try:
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+        # -------------------------------------------------
+        # 1. Open Graph
+        # -------------------------------------------------
+
+        og_image = soup.find(
+            "meta",
+            attrs={"property": "og:image"}
+        )
+
+        if og_image and og_image.get("content"):
+            image = make_absolute_url(
+                og_image["content"],
+                article_url
+            )
+
+            if valid_image_url(image):
+                print(f"Imagen encontrada (og:image): {image}")
                 return image
 
-    return None
+        # -------------------------------------------------
+        # 2. Twitter
+        # -------------------------------------------------
 
-
-def get_decoding_params(google_url):
-
-    try:
-        parsed = urllib.parse.urlparse(
-            google_url
+        twitter_image = soup.find(
+            "meta",
+            attrs={"name": "twitter:image"}
         )
 
-        article_id = parsed.path.split("/")[-1]
-
-        if not article_id:
-            return None
-
-        article_url = (
-            "https://news.google.com/rss/articles/"
-            + article_id
-        )
-
-        request = urllib.request.Request(
-            article_url,
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Accept-Language": "es-ES,es;q=0.9"
-            }
-        )
-
-        with urllib.request.urlopen(
-            request,
-            timeout=20
-        ) as response:
-            page = response.read().decode(
-                "utf-8",
-                errors="ignore"
+        if not twitter_image:
+            twitter_image = soup.find(
+                "meta",
+                attrs={"property": "twitter:image"}
             )
 
-        signature_match = re.search(
-            r'data-n-a-sg="([^"]+)"',
-            page
+        if twitter_image and twitter_image.get("content"):
+            image = make_absolute_url(
+                twitter_image["content"],
+                article_url
+            )
+
+            if valid_image_url(image):
+                print(
+                    f"Imagen encontrada (Twitter): {image}"
+                )
+                return image
+
+        # -------------------------------------------------
+        # 3. JSON-LD
+        # -------------------------------------------------
+
+        scripts = soup.find_all(
+            "script",
+            attrs={"type": "application/ld+json"}
         )
 
-        timestamp_match = re.search(
-            r'data-n-a-ts="([^"]+)"',
-            page
-        )
+        for script in scripts:
+            try:
+                data = json.loads(
+                    script.string or script.get_text()
+                )
 
-        if not signature_match or not timestamp_match:
-            print("No se encontraron los parámetros de Google News.")
-            return None
+                objects = []
 
-        return {
-            "id": article_id,
-            "signature": signature_match.group(1),
-            "timestamp": timestamp_match.group(1)
-        }
+                if isinstance(data, dict):
+                    objects.append(data)
 
-    except Exception as error:
-        print(
-            "Error obteniendo parámetros:",
-            error
-        )
+                    if isinstance(data.get("@graph"), list):
+                        objects.extend(data["@graph"])
 
-        return None
+                elif isinstance(data, list):
+                    objects.extend(data)
 
+                for obj in objects:
+                    if not isinstance(obj, dict):
+                        continue
 
-def decode_google_news_url(google_url):
+                    image_data = obj.get("image")
 
-    params = get_decoding_params(
-        google_url
-    )
+                    if isinstance(image_data, str):
+                        image = make_absolute_url(
+                            image_data,
+                            article_url
+                        )
 
-    if not params:
-        return None
+                        if valid_image_url(image):
+                            print(
+                                f"Imagen encontrada (JSON-LD): {image}"
+                            )
+                            return image
 
-    article_id = params["id"]
-    signature = params["signature"]
-    timestamp = params["timestamp"]
+                    elif isinstance(image_data, dict):
+                        image_data = image_data.get("url")
 
-    request_data = (
-        '["garturlreq",'
-        '[["X","X",["X","X"],null,null,1,1,'
-        '"US:en",null,1,null,null,null,null,null,0,1],'
-        '"X","X",1,[1,1,1],1,1,null,0,0,null,0],'
-        f'"{article_id}",'
-        f'{timestamp},'
-        f'"{signature}"'
-        ']'
-    )
+                        image = make_absolute_url(
+                            image_data,
+                            article_url
+                        )
 
-    batch = [
-        [
-            "Fbv4je",
-            request_data,
-            None,
-            "generic"
+                        if valid_image_url(image):
+                            print(
+                                f"Imagen encontrada (JSON-LD): {image}"
+                            )
+                            return image
+
+                    elif isinstance(image_data, list):
+                        for item in image_data:
+                            if isinstance(item, str):
+                                image = make_absolute_url(
+                                    item,
+                                    article_url
+                                )
+
+                                if valid_image_url(image):
+                                    print(
+                                        "Imagen encontrada "
+                                        "(JSON-LD lista)"
+                                    )
+                                    return image
+
+            except Exception:
+                continue
+
+        # -------------------------------------------------
+        # 4. Meta tags alternativos
+        # -------------------------------------------------
+
+        possible_tags = [
+            ("meta", "name", "image"),
+            ("meta", "property", "image"),
+            ("meta", "name", "thumbnail"),
+            ("meta", "property", "thumbnail"),
         ]
-    ]
 
-    payload = (
-        "f.req="
-        + urllib.parse.quote(
-            json.dumps([batch])
-        )
-    )
-
-    request = urllib.request.Request(
-        "https://news.google.com/_/DotsSplashUi/data/batchexecute",
-        data=payload.encode("utf-8"),
-        headers={
-            "Content-Type":
-                "application/x-www-form-urlencoded;charset=UTF-8",
-            "User-Agent":
-                "Mozilla/5.0",
-            "Referer":
-                "https://news.google.com/"
-        },
-        method="POST"
-    )
-
-    try:
-
-        with urllib.request.urlopen(
-            request,
-            timeout=20
-        ) as response:
-
-            result = response.read().decode(
-                "utf-8",
-                errors="ignore"
+        for tag, attribute, value in possible_tags:
+            element = soup.find(
+                tag,
+                attrs={attribute: value}
             )
 
-        match = re.search(
-            r'\[\\"garturlres\\",\\"(https?://.*?),',
-            result
-        )
+            if element and element.get("content"):
+                image = make_absolute_url(
+                    element["content"],
+                    article_url
+                )
 
-        if match:
+                if valid_image_url(image):
+                    print(
+                        f"Imagen encontrada (meta): {image}"
+                    )
+                    return image
 
-            decoded_url = match.group(1)
+        # -------------------------------------------------
+        # 5. Primera imagen grande de la página
+        # -------------------------------------------------
 
-            decoded_url = (
-                decoded_url
-                .replace('\\"', '"')
-                .replace("\\/", "/")
-            )
+        for img in soup.find_all("img"):
+            candidates = [
+                img.get("src"),
+                img.get("data-src"),
+                img.get("data-lazy-src"),
+                img.get("data-original"),
+            ]
 
-            return decoded_url
+            for candidate in candidates:
+                image = make_absolute_url(
+                    candidate,
+                    article_url
+                )
 
-        print(
-            "Google no devolvió la URL original."
-        )
+                if valid_image_url(image):
+                    print(
+                        f"Imagen encontrada (img): {image}"
+                    )
+                    return image
 
-    except Exception as error:
+    except Exception as e:
+        print(f"Error buscando imagen: {e}")
 
-        print(
-            "Error en batchexecute:",
-            error
-        )
-
+    print("No se encontró imagen.")
     return None
 
 
-def get_original_url(google_url):
+# =========================================================
+# IMAGEN DE RESPALDO
+# =========================================================
 
-    if not google_url:
-        return None
+def get_fallback_image(title):
+    """
+    Imagen de respaldo.
+    Usamos una imagen estable de Unsplash relacionada
+    con videojuegos. Así nunca dejamos la tarjeta vacía.
+    """
 
-    if "news.google.com" not in google_url:
-        return google_url
-
-    return decode_google_news_url(
-        google_url
+    return (
+        "https://images.unsplash.com/"
+        "photo-1542751371-adc38448a05e"
+        "?auto=format&fit=crop&w=1200&q=80"
     )
 
 
-def get_article_image(original_url):
+# =========================================================
+# OBTENER NOTICIAS
+# =========================================================
 
-    if not original_url:
-        return None
+def get_news():
+    print("Descargando Google News...")
 
-    data = download(
-        original_url
-    )
+    response = download(RSS_URL)
 
-    if not data:
-        return None
+    if not response:
+        return []
 
-    page = data.decode(
-        "utf-8",
-        errors="ignore"
-    )
+    try:
+        root = ET.fromstring(response.content)
 
-    return find_image(
-        page
-    )
+    except Exception as e:
+        print(f"Error leyendo RSS: {e}")
+        return []
 
+    articles = []
+
+    for item in root.findall(".//item"):
+        title_element = item.find("title")
+        link_element = item.find("link")
+        description_element = item.find("description")
+        date_element = item.find("pubDate")
+
+        if title_element is None:
+            continue
+
+        title = clean_text(
+            title_element.text
+        )
+
+        google_link = (
+            link_element.text.strip()
+            if link_element is not None
+            and link_element.text
+            else ""
+        )
+
+        description = clean_text(
+            description_element.text
+            if description_element is not None
+            else ""
+        )
+
+        date = (
+            date_element.text.strip()
+            if date_element is not None
+            and date_element.text
+            else ""
+        )
+
+        if not google_link:
+            continue
+
+        articles.append({
+            "title": title,
+            "description": description,
+            "googleLink": google_link,
+            "date": date
+        })
+
+    return articles
+
+
+# =========================================================
+# PROGRAMA PRINCIPAL
+# =========================================================
 
 def main():
 
-    print("Descargando noticias...")
+    articles = get_news()
 
-    data = download(
-        RSS_URL
-    )
+    print(f"Noticias encontradas en RSS: {len(articles)}")
 
-    if not data:
+    final_news = []
+    seen_urls = set()
+    seen_titles = set()
 
-        print(
-            "No se pudo descargar el RSS."
-        )
+    for index, article in enumerate(articles):
 
-        return
+        if len(final_news) >= MAX_NEWS:
+            break
 
-    try:
+        title = article["title"]
 
-        root = ET.fromstring(
-            data
-        )
-
-    except Exception as error:
-
-        print(
-            "Error leyendo RSS:",
-            error
-        )
-
-        return
-
-    articles = []
-    used_images = set()
-
-    for item in root.findall(".//item"):
-
-        title = item.findtext(
-            "title",
-            ""
-        ).strip()
-
-        google_url = item.findtext(
-            "link",
-            ""
-        ).strip()
-
-        pub_date = item.findtext(
-            "pubDate",
-            ""
-        ).strip()
-
-        description = item.findtext(
-            "description",
-            ""
-        ).strip()
-
-        if not title or not google_url:
+        if not title:
             continue
 
+        title_key = title.lower().strip()
+
+        if title_key in seen_titles:
+            continue
+
+        print("")
+        print("=" * 60)
         print(
-            "Procesando:",
-            title
+            f"Noticia {len(final_news) + 1}: {title}"
         )
 
-        original_url = get_original_url(
-            google_url
+        # -------------------------------------------------
+        # Decodificar URL
+        # -------------------------------------------------
+
+        original_url = decode_google_news_url(
+            article["googleLink"]
         )
 
         if not original_url:
-
-            print(
-                "No se encontró la URL original."
-            )
-
+            print("No se encontró la URL original.")
             continue
 
-        print(
-            "URL original:",
-            original_url
-        )
+        print(f"URL original: {original_url}")
+
+        # -------------------------------------------------
+        # Evitar duplicados
+        # -------------------------------------------------
+
+        if original_url in seen_urls:
+            continue
+
+        seen_urls.add(original_url)
+        seen_titles.add(title_key)
+
+        # -------------------------------------------------
+        # Buscar imagen
+        # -------------------------------------------------
 
         image = get_article_image(
             original_url
         )
 
+        # -------------------------------------------------
+        # FALLBACK
+        # -------------------------------------------------
+
         if not image:
-
-            image = find_image(
-                description
-            )
-
-        if image in used_images:
-
             print(
-                "Imagen repetida, descartada."
+                "Usando imagen de respaldo."
             )
 
-            image = ""
+            image = get_fallback_image(title)
 
-        if image:
-            used_images.add(
-                image
-            )
+        # -------------------------------------------------
+        # Guardar noticia
+        # -------------------------------------------------
 
-        article = {
-            "title": clean_text(
-                title
-            ),
-            "description": clean_text(
-                description
-            )[:300],
+        news_item = {
+            "title": title,
+            "description": article["description"],
             "link": original_url,
-            "googleLink": google_url,
+            "googleLink": article["googleLink"],
             "image": image,
             "category": "Para ti",
             "game": "",
-            "date": pub_date
+            "date": article["date"]
         }
 
-        articles.append(
-            article
-        )
+        final_news.append(news_item)
 
-        if len(articles) >= 60:
-            break
+        # Pequeña pausa para no bombardear las webs
+        time.sleep(0.3)
 
-    unique = []
-    seen_titles = set()
-
-    for article in articles:
-
-        key = article["title"].lower().strip()
-
-        if key in seen_titles:
-            continue
-
-        seen_titles.add(
-            key
-        )
-
-        unique.append(
-            article
-        )
+    # -----------------------------------------------------
+    # Guardar JSON
+    # -----------------------------------------------------
 
     with open(
-        OUTPUT_FILE,
+        "news.json",
         "w",
         encoding="utf-8"
     ) as file:
 
         json.dump(
-            unique,
+            final_news,
             file,
             ensure_ascii=False,
             indent=2
         )
 
-    print("--------------------------------")
-
-    print(
-        f"Noticias guardadas: {len(unique)}"
+    images = sum(
+        1
+        for article in final_news
+        if article.get("image")
     )
 
-    print(
-        "Noticias con imagen:",
-        sum(
-            1
-            for article in unique
-            if article.get("image")
-        )
-    )
-
-    print("--------------------------------")
+    print("")
+    print("=" * 60)
+    print(f"Noticias guardadas: {len(final_news)}")
+    print(f"Noticias con imagen: {images}")
+    print("news.json actualizado correctamente.")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
