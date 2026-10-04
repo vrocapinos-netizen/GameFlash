@@ -73,25 +73,80 @@ def find_image(text):
 
     return None
 
-
 def get_original_url(google_url):
 
     try:
-        from googlenewsdecoder import gnewsdecoder
+        import urllib.parse
+        import urllib.request
+        import re
+        import json
 
-        result = gnewsdecoder(
+        request = urllib.request.Request(
             google_url,
-            interval=1
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
         )
 
-        if result.get("status"):
-            return result.get("decoded_url")
+        with urllib.request.urlopen(
+            request,
+            timeout=15
+        ) as response:
+            page = response.read().decode(
+                "utf-8",
+                errors="ignore"
+            )
+
+        # Buscar una URL de artículo directamente
+        patterns = [
+            r'"url":"(https?://[^"]+)"',
+            r'"articleUrl":"(https?://[^"]+)"',
+            r'"targetUrl":"(https?://[^"]+)"'
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(
+                pattern,
+                page
+            )
+
+            for url in matches:
+                url = urllib.parse.unquote(url)
+
+                if (
+                    "google.com" not in url
+                    and "googleusercontent.com" not in url
+                    and "gstatic.com" not in url
+                ):
+                    return url
+
+        # Buscar enlaces normales dentro de la página
+        urls = re.findall(
+            r'https?://[^\s"<>]+',
+            page
+        )
+
+        for url in urls:
+            url = urllib.parse.unquote(
+                url
+            )
+
+            if (
+                "google.com" not in url
+                and "googleusercontent.com" not in url
+                and "gstatic.com" not in url
+                and "google-analytics.com" not in url
+            ):
+                return url
 
     except Exception as error:
-        print("Error decodificando Google News:", error)
+        print(
+            "Error obteniendo URL original:",
+            error
+        )
 
     return None
-
+    
 def get_article_image(original_url):
 
     data = download(original_url)
