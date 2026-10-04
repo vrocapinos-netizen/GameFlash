@@ -1,8 +1,5 @@
-- name: Instalar dependencias
-  run: pip install googlenewsdecoder
+name: Actualizar noticias GameFlash
 
-- name: Actualizar noticias GameFlash
-  run: python scripts/fetch_news.py
 on:
   schedule:
     - cron: "7 * * * *"
@@ -14,9 +11,13 @@ permissions:
 jobs:
   update-news:
     runs-on: ubuntu-latest
+
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
+
+      - name: Instalar dependencias
+        run: pip install googlenewsdecoder
 
       - name: Actualizar noticias
         run: python scripts/fetch_news.py
