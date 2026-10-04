@@ -6,13 +6,14 @@ import html
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
-
-RSS_URL = "https://news.google.com/rss/search?q=videojuegos+gaming+videojuegos&hl=es&gl=ES&ceid=ES:es"
 
 OUTPUT_FILE = "news.json"
 
-FALLBACK_IMAGE = "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1200&q=80"
+RSS_URL = (
+    "https://news.google.com/rss/search?"
+    "q=videojuegos+gaming+PlayStation+Xbox+Nintendo+PC"
+    "&hl=es&gl=ES&ceid=ES:es"
+)
 
 
 def download(url):
@@ -37,6 +38,7 @@ def clean_text(text):
 
     text = html.unescape(text)
     text = re.sub(r"<[^>]+>", "", text)
+
     return text.strip()
 
 
@@ -46,14 +48,22 @@ def find_image(text):
 
     patterns = [
         r'<img[^>]+src=["\']([^"\']+)["\']',
-        r'<img[^>]+src=([^ >]+)',
+        r'<img[^>]+src=([^ >]+)'
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
 
         if match:
-            image = html.unescape(match.group(1))
+
+            image = html.unescape(
+                match.group(1)
+            )
 
             if image.startswith("http"):
                 return image
@@ -61,29 +71,42 @@ def find_image(text):
     return None
 
 
-def get_original_image(url):
+def get_webpage_image(url):
+
     data = download(url)
 
     if not data:
         return None
 
-    try:
-        page = data.decode("utf-8", errors="ignore")
-    except Exception:
-        return None
+    page = data.decode(
+        "utf-8",
+        errors="ignore"
+    )
 
     patterns = [
+
         r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+
         r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']'
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, page, re.IGNORECASE)
+
+        match = re.search(
+            pattern,
+            page,
+            re.IGNORECASE
+        )
 
         if match:
-            image = html.unescape(match.group(1))
+
+            image = html.unescape(
+                match.group(1)
+            )
 
             if image.startswith("http"):
                 return image
@@ -92,6 +115,7 @@ def get_original_image(url):
 
 
 def get_text(element, tag):
+
     found = element.find(tag)
 
     if found is not None and found.text:
@@ -105,12 +129,16 @@ def main():
     data = download(RSS_URL)
 
     if not data:
+
         print("No se pudo descargar el RSS.")
         return
 
     try:
+
         root = ET.fromstring(data)
+
     except Exception as error:
+
         print("Error leyendo RSS:", error)
         return
 
@@ -118,52 +146,96 @@ def main():
 
     for item in root.findall(".//item"):
 
-        title = get_text(item, "title")
-        link = get_text(item, "link")
-        pub_date = get_text(item, "pubDate")
-        description = get_text(item, "description")
+        title = get_text(
+            item,
+            "title"
+        )
+
+        link = get_text(
+            item,
+            "link"
+        )
+
+        pub_date = get_text(
+            item,
+            "pubDate"
+        )
+
+        description = get_text(
+            item,
+            "description"
+        )
 
         if not title or not link:
             continue
 
-        image = None
+        # Primero buscamos una imagen dentro del RSS
+        image = find_image(
+            description
+        )
 
-        # Buscar imagen dentro de la descripción del RSS
-        image = find_image(description)
+        # Después intentamos encontrar la imagen
+        # de la página original
+        if image is None:
 
-        # Buscar imágenes en media:content / media:thumbnail
+            image = get_webpage_image(
+                link
+            )
+
+        # Buscar imágenes en elementos media
         if image is None:
 
             for child in item:
+
                 tag = child.tag.lower()
 
-                if "content" in tag or "thumbnail" in tag or "enclosure" in tag:
+                if (
+                    "content" in tag
+                    or "thumbnail" in tag
+                    or "enclosure" in tag
+                ):
 
-                    url = child.attrib.get("url")
+                    image_url = child.attrib.get(
+                        "url"
+                    )
 
-                    if url and url.startswith("http"):
-                        image = url
+                    if (
+                        image_url
+                        and image_url.startswith("http")
+                    ):
+
+                        image = image_url
                         break
 
-        # Intentar conseguir la imagen original
+        # Si no encontramos ninguna imagen,
+        # NO ponemos una imagen genérica.
         if image is None:
-            image = get_original_image(link)
-
-        # Imagen de emergencia
-        if image is None:
-            image = FALLBACK_IMAGE
+            image = ""
 
         article = {
-            "title": clean_text(title),
-            "description": clean_text(description)[:300],
+
+            "title": clean_text(
+                title
+            ),
+
+            "description": clean_text(
+                description
+            )[:300],
+
             "link": link,
+
             "image": image,
+
             "category": "Para ti",
+
             "game": "",
+
             "date": pub_date
         }
 
-        articles.append(article)
+        articles.append(
+            article
+        )
 
     # Eliminar noticias repetidas
     unique = []
@@ -177,43 +249,20 @@ def main():
             continue
 
         seen.add(key)
-        unique.append(article)
+
+        unique.append(
+            article
+        )
 
     # Máximo 60 noticias
     unique = unique[:60]
 
-    # Si ya existe news.json, conservar noticias anteriores
-    try:
-
-        with open(OUTPUT_FILE, "r", encoding="utf-8") as file:
-            old_news = json.load(file)
-
-            if isinstance(old_news, list):
-
-                existing_titles = {
-                    article.get("title", "").lower().strip()
-                    for article in unique
-                }
-
-                for old_article in old_news:
-
-                    title = old_article.get("title", "").lower().strip()
-
-                    if title and title not in existing_titles:
-
-                        if not old_article.get("image"):
-                            old_article["image"] = FALLBACK_IMAGE
-
-                        unique.append(old_article)
-
-                        existing_titles.add(title)
-
-    except Exception:
-        pass
-
-    unique = unique[:60]
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as file:
+    # Guardar noticias
+    with open(
+        OUTPUT_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
         json.dump(
             unique,
@@ -222,7 +271,9 @@ def main():
             indent=2
         )
 
-    print(f"Noticias guardadas: {len(unique)}")
+    print(
+        f"Noticias guardadas: {len(unique)}"
+    )
 
 
 if __name__ == "__main__":
