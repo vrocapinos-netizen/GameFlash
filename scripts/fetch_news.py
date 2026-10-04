@@ -77,41 +77,20 @@ def find_image(text):
 def get_original_url(google_url):
 
     try:
-        data = download(google_url)
+        from googlenewsdecoder import gnewsdecoder
 
-        if not data:
-            return None
-
-        page = data.decode(
-            "utf-8",
-            errors="ignore"
+        result = gnewsdecoder(
+            google_url,
+            interval=1
         )
 
-        # Buscar una URL http/https dentro de la respuesta
-        urls = re.findall(
-            r'https?://[^\s"<>]+',
-            page
-        )
-
-        for url in urls:
-
-            url = html.unescape(url)
-
-            # Ignorar URLs de Google
-            if "google.com" in url:
-                continue
-
-            if "googleusercontent.com" in url:
-                continue
-
-            if url.startswith("http"):
-                return url
+        if result.get("status"):
+            return result.get("decoded_url")
 
     except Exception as error:
-        print("Error buscando URL original:", error)
+        print("Error decodificando Google News:", error)
 
     return None
-
 
 def get_article_image(original_url):
 
