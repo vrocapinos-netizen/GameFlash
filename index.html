@@ -203,6 +203,19 @@
   .news-card.is-auto .news-overlay { top:calc(var(--gameflash-header-h,112px) + 6px + 56.25vw) !important; }
   .news-card.is-auto > .relative.z-10 { top:calc(var(--gameflash-header-h,112px) + 6px + 56.25vw + 14px) !important; }
 }
+       /* Botón Me gusta: morado neón */
+#likesOpen {
+  background: linear-gradient(135deg, #7c3aed, #a855f7) !important;
+  border: 1px solid #d8b4fe !important;
+  color: white !important;
+  box-shadow: 0 0 8px #a855f7, 0 0 20px #7c3aed80 !important;
+  transition: all 0.25s ease !important;
+}
+
+#likesOpen:hover {
+  box-shadow: 0 0 12px #c084fc, 0 0 28px #a855f7 !important;
+  transform: translateY(-2px);
+}
 </style>
 </head>
 <body class="bg-[#0b0c0e] text-white overflow-hidden h-screen w-screen">
